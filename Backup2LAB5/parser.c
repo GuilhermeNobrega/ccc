@@ -52,6 +52,7 @@ void make_variable_node_and_register(struct history* history, struct datatype* d
         .var.val = value_node,
         .var.type = *dtype
     });
+    //printf("DEBUG: [make_variable_node_and_register] Criando nó para variável: %s\n", name_token->sval);
 
     // Empilha no vetor global de nós
     node_push(var_node);
@@ -73,14 +74,68 @@ void parse_datatype(struct datatype* dtype) { // LAB5
 }
 
 
-void parse_keyword(struct history* history) { // LAB5
-    struct token* token = token_peek_next();
+void parse_keyword(struct history* history) {
+    struct token* datatype_token = token_next();  // Consome o 'int' ou 'float'
+    struct datatype dtype;
 
-    if (is_keyword_variable_modifier(token->sval) || keyword_is_datatype(token->sval)) {
-        parse_variable_function_or_struct_union(history);
-        return;
+    parser_datatype_init_type_and_size_for_primitive(datatype_token, NULL, &dtype);
+    struct vector* var_list = vector_create(sizeof(struct node*));
+
+    // Criar lista de variáveis
+    parser_datatype_init_type_and_size_for_primitive(datatype_token, NULL, &dtype);
+
+    while (1) {
+        struct token* name_token = token_next();  // Nome da variável
+
+        // Verifica inicialização (ex: b = 2)
+        struct node* value_node = NULL;
+        struct token* next = token_peek_next();
+        if (next && next->type == TOKEN_TYPE_OPERATOR && strcmp(next->sval, "=") == 0) {
+            token_next();  // consome '='
+            parse_expressionable(history);
+            value_node = node_pop();
+        }
+
+        // Cria o nó de variável
+        struct node* var_node = node_create(&(struct node){
+            .type = NODE_TYPE_VARIABLE,
+            .var.name = name_token->sval,
+            .var.val = value_node,
+            .var.type = dtype
+        });
+
+        vector_push(var_list, &var_node);
+
+        struct token* sep = token_peek_next();
+
+                
+        if (!sep) {
+            // Se não houver mais tokens, assume que a declaração terminou corretamente.
+            break;
+        }
+
+        if (sep->type == TOKEN_TYPE_SYMBOL && sep->cval == ',') {
+            token_next(); // consome vírgula
+            continue;
+        } else if (sep->type == TOKEN_TYPE_SYMBOL && sep->cval == ';') {
+            token_next(); // consome ponto e vírgula
+            break;
+        } else {
+            compiler_error(current_process, "Esperava ',' ou ';' após variável.");
+        }
+
     }
+
+    // Cria um nó de lista de variáveis
+    struct node* var_list_node = node_create(&(struct node){
+        .type = NODE_TYPE_VARIABLE_LIST,
+        .var_list.list = var_list
+    });
+
+    node_push(var_list_node);
+    vector_push(node_vector_root, &var_list_node);
 }
+
 void parse_expressionable_root(struct history* history) { // LAB5 - Parte 2
     parse_expressionable(history);
 
@@ -437,7 +492,11 @@ struct token* token_peek_next() {
     return vector_peek_no_increment(current_process->token_vec);
 }
 void parse_identifier(struct history* history) { // LAB5
-    assert(token_peek_next()->type == NODE_TYPE_IDENTIFIER);
+    struct token* token = token_peek_next();
+    if (!token || token->type != TOKEN_TYPE_IDENTIFIER) {
+        compiler_error(current_process, "Esperado identificador após declaração.");
+    }
+
     parse_single_token_to_node();
 }
 
@@ -522,25 +581,37 @@ int parse_expressionable_single(struct history* history) {
     struct token* token = token_peek_next();
     if (!token) return -1;
 
-    history->flags |= NODE_FLAG_INSIDE_EXPRESSION;
+    if (token->type == TOKEN_TYPE_KEYWORD || token->type == TOKEN_TYPE_IDENTIFIER || token->type == TOKEN_TYPE_OPERATOR) {
+        printf("DEBUG: [parse_expressionable_single] Token válido => tipo: %d, sval: %s\n",
+               token->type, token->sval ? token->sval : "NULL");
+    } else {
+        printf("DEBUG: [parse_expressionable_single] Token simbólico => tipo: %d, cval: '%c'\n",
+               token->type, token->cval);
+    }
+
     int res = -1;
 
     switch (token->type) {
         case TOKEN_TYPE_NUMBER:
+            //printf("DEBUG: Entrou no case TOKEN_TYPE_NUMBER\n");
             parse_single_token_to_node();
             res = 0;
             break;
-        case TOKEN_TYPE_IDENTIFIER: // LAB5
-            res = 0;
+
+        case TOKEN_TYPE_IDENTIFIER:
+            //printf("DEBUG: Entrou no case TOKEN_TYPE_IDENTIFIER\n");
             parse_identifier(history);
+            res = 0;
             break;
 
-        case TOKEN_TYPE_KEYWORD: // LAB5
+        case TOKEN_TYPE_KEYWORD:
+            //printf("DEBUG: Entrou no case TOKEN_TYPE_KEYWORD\n");
             parse_keyword(history);
             res = 0;
             break;
 
         case TOKEN_TYPE_OPERATOR:
+            //printf("DEBUG: Entrou no case TOKEN_TYPE_OPERATOR\n");
             parse_exp(history);
             res = 0;
             break;
@@ -582,8 +653,17 @@ int parse_expressionable_single(struct history* history) {
             break;
     }
 
+    // ✅ NOVO TRECHO PARA CONSUMIR ',' E ';'
+    token = token_peek_next();
+    if (token && token->type == TOKEN_TYPE_SYMBOL && (token->cval == ',' || token->cval == ';')) {
+        //printf("DEBUG: Consumindo símbolo '%c'\n", token->cval);
+        token_next(); // consumir e ignorar
+        res = 0;      // considerar sucesso
+    }
+
     return res;
 }
+
 
 
 // Analisa uma sequência de tokens expressáveis.
@@ -613,16 +693,21 @@ int parse_next() {
     return 0;
 }
 
-// Função principal de parsing.
 int parse(struct compile_process* process) {
     current_process = process;
     parser_last_token = NULL;
-    struct node* node = NULL;
 
     node_set_vector(process->node_vec, process->node_tree_vec);
     vector_set_peek_pointer(process->token_vec, 0);
+
+    // Enquanto houver tokens, processa como expressão/declaração
+    while (token_peek_next()) {
+        parse_expressionable(history_begin(0));
+    }
+
     return PARSE_ALL_OK;
 }
+
 void parser_reorder_expression(struct node** node_out) {
     struct node* node = *node_out;
 
