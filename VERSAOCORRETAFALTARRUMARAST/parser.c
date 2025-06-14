@@ -11,20 +11,19 @@ void parse_expressionable(struct history* history);
 void make_variable_node_and_register(struct history* history, struct datatype* dtype, struct token* name_token, struct node* value_node);
 void make_variable_node(struct datatype* dtype, struct token* name_token, struct node* value_node);
 static bool token_next_is_operator(const char* op);
-void node_clear_expression_stack();
 
 // Funções auxiliares que ainda não têm protótipo
 struct token* token_next();
 struct token* token_peek_next();
 void parse_single_token_to_node();
-struct compile_process* current_process;
+static struct compile_process* current_process;
 static struct token* parser_last_token;
 extern struct expressionable_op_precedence_group op_precedence[TOTAL_OPERATOR_GROUPS]; // LAB4
 void parser_reorder_expression(struct node** pnode); // LAB4
 void parser_node_shift_children_left(struct node* node); // LAB4
 
 //LAB5
-void print_node(struct node* node, int indent);
+
 static bool keyword_is_datatype(const char* val);
 static bool is_keyword_variable_modifier(const char* val);
 bool token_is_primitive_keyword(struct token* token);
@@ -60,8 +59,6 @@ void make_variable_node_and_register(struct history* history, struct datatype* d
 
     // Registra na raiz da árvore
     vector_push(node_vector_root, &var_node);
-    node_clear_expression_stack();
-
 }
 
 void parse_datatype(struct datatype* dtype) { // LAB5
@@ -97,7 +94,6 @@ void parse_keyword(struct history* history) {
             token_next();  // consome '='
             parse_expressionable(history);
             value_node = node_pop();
-            
         }
 
         // Cria o nó de variável
@@ -140,22 +136,8 @@ void parse_keyword(struct history* history) {
     vector_push(node_vector_root, &var_list_node);
 }
 
-void parse_expressionable_root(struct history* history) {
-    struct token* next = token_peek_next();
-    if (next && next->type == TOKEN_TYPE_SYMBOL &&
-        (next->cval == ',' || next->cval == ';')) {
-        // Nada a analisar (ex: var a;)
-        return;
-    }
-
+void parse_expressionable_root(struct history* history) { // LAB5 - Parte 2
     parse_expressionable(history);
-
-    // Após análise, verifica se o próximo token é um delimitador
-    struct token* after_expr = token_peek_next();
-    if (!after_expr || after_expr->type != TOKEN_TYPE_SYMBOL || 
-        (after_expr->cval != ',' && after_expr->cval != ';')) {
-        compiler_error(current_process, "Esperado ',' ou ';' após valor da variável.");
-    }
 
     struct node* result_node = node_pop();
     node_push(result_node);
@@ -170,17 +152,8 @@ void parse_variable(struct datatype* dtype, struct token* name_token, struct his
         // Verifica se há atribuição
         if (token_next_is_operator("=")) {
             token_next(); // consome "="
-
-            // 🧼 Limpa pilha de expressão temporária (node_vec)
-            node_clear_expression_stack();
-
-            // 🧠 Analisa expressão do lado direito
             parse_expressionable_root(history);
-                
-
-            // 🧪 Captura nó da expressão (ex: NUMBER)
             value_node = node_pop();
-            print_node(value_node, 0); //debug
         }
 
         // Cria e registra o nó da variável individual
@@ -204,10 +177,11 @@ void parse_variable(struct datatype* dtype, struct token* name_token, struct his
         }
 
         // Se não for vírgula nem ponto-e-vírgula, é erro
-        compiler_error(current_process, "Esperava ',' ou ';' após variável.");
+        printf("Erro: esperava ',' ou ';' após variável.\n");
+        exit(1);
     }
 
-    // Cria o node de tipo LISTA DE VARIÁVEIS
+    // Criamos agora o node de tipo LISTA DE VARIÁVEIS
     struct node* var_list_node = node_create(&(struct node){
         .type = NODE_TYPE_VARIABLE_LIST,
         .var_list.list = var_list
@@ -607,9 +581,6 @@ int parse_expressionable_single(struct history* history) {
     struct token* token = token_peek_next();
     if (!token) return -1;
 
-    if (token->type == TOKEN_TYPE_SYMBOL && (token->cval == ',' || token->cval == ';')) {
-    return -1;
-}
     if (token->type == TOKEN_TYPE_KEYWORD || token->type == TOKEN_TYPE_IDENTIFIER || token->type == TOKEN_TYPE_OPERATOR) {
         printf("DEBUG: [parse_expressionable_single] Token válido => tipo: %d, sval: %s\n",
                token->type, token->sval ? token->sval : "NULL");

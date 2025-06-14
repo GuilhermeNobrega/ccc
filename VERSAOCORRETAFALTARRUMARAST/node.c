@@ -2,8 +2,6 @@
 #include "helpers/vector.h"
 #include <assert.h>
 #include <stdio.h>
-extern struct compile_process* current_process;
-
 void print_node_tree(struct vector* node_tree_vec, int indent) {
     for (int i = 0; i < vector_count(node_tree_vec); i++) {
         struct node* n = *(struct node**)vector_at(node_tree_vec, i);
@@ -205,9 +203,4 @@ struct node* node_create(struct node* _node) {
     memcpy(node, _node, sizeof(struct node));
     node_push(node);
     return node;
-}
-void node_clear_expression_stack() {
-    if (!current_process) return;
-    vector_clear(current_process->node_vec);
-
 }
